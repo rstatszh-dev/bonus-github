@@ -1,10 +1,10 @@
 ---
-title: "Titel anpassen"
-subtitle: "Untertitel hinzufügen"
-author: 
+title: "Verkehrsunfälle im Kanton Zürich"
+subtitle: "Wer verunfallt, wie schwer, und wann?"
+author:
   - name: "Vorname Nachname"
     email: "vorname.nachname@bi.zh.ch"
-    affiliation: "Organisationsname"
+    affiliation: "Statistisches Amt Kanton Zürich"
 date: last-modified
 date-format: "DD.MM.YYYY"
 lang: de-CH
@@ -12,7 +12,7 @@ published-title: "Datum"
 affiliation-title: "Organisationseinheit"
 abstract-title: "Klassifikation"
 abstract: "Intern"
-format: 
+format:
     html:
         # Themeing
         theme: _extensions/biplaR-html/style/bipla.scss
@@ -35,13 +35,292 @@ execute:
   echo: false
 ---
 
+```{r}
+#| label: setup
+library(tidyverse)
+library(statR)
+```
+
+```{r}
+#| label: daten-einlesen
+verkehrsunfaelle <- read_csv(
+  here::here("../data/data/ktzh-verkehrsunfaelle/verkehrsunfaelle-klein.csv")
+)
+```
+
+```{r}
+#| label: aufbereitung
+# Wochentage und Schweregrade in eine sinnvolle Reihenfolge bringen
+wochentage <- c("Montag", "Dienstag", "Mittwoch", "Donnerstag",
+                "Freitag", "Samstag", "Sonntag")
+
+schweregrade <- c("Unfall mit Sachschaden", "Unfall mit Leichtverletzten",
+                  "Unfall mit Schwerverletzten", "Unfall mit Getöteten")
+
+# Pro Unfall eine Verkehrsteilnahme-Kategorie ableiten. Ist mehr als eine
+# Kategorie beteiligt, zählen wir den Unfall zur besonders gefährdeten Gruppe
+# (zu Fuss vor Velo vor Motorrad).
+verkehrsunfaelle <- verkehrsunfaelle |>
+  mutate(
+    wochentag = factor(wochentag, levels = wochentage),
+    schweregrad = factor(schweregrad, levels = schweregrade),
+    beteiligung = case_when(
+      fussgaenger ~ "Zu Fuss",
+      fahrrad     ~ "Velo",
+      motorrad    ~ "Motorrad",
+      .default    = "Übrige (v.a. Auto)"
+    ),
+    schwer_verletzt_getoetet = schweregrad %in%
+      c("Unfall mit Schwerverletzten", "Unfall mit Getöteten")
+  )
+
+beteiligung_levels <- c("Zu Fuss", "Velo", "Motorrad", "Übrige (v.a. Auto)")
+verkehrsunfaelle <- verkehrsunfaelle |>
+  mutate(beteiligung = factor(beteiligung, levels = beteiligung_levels))
+```
 
 # Ausgangslage
 
+Die Kantonspolizei Zürich veröffentlicht als Open Government Data alle polizeilich registrierten Verkehrsunfälle im Kanton Zürich seit 2011. Jede Zeile im Datensatz ist ein einzelner Unfall mit Angaben zu Unfalltyp, Schweregrad, beteiligten Verkehrsteilnehmenden, Strassentyp und Zeitpunkt.
+
+Für diesen Bericht verwenden wir einen Ausschnitt mit zehn Variablen und rund `r gt::vec_fmt_number(nrow(verkehrsunfaelle), sep_mark = "'", suffixing = TRUE, decimals = 0)` Unfällen. Die Analyse geht über eine reine Häufigkeitszählung hinaus. Sie fragt nicht nur, *wie viele* Unfälle passieren, sondern *wen* es trifft und *wie schwer*. Im Zentrum stehen die besonders gefährdeten Verkehrsteilnehmenden: zu Fuss Gehende, Velofahrende und Motorradfahrende.
+
+Datenquelle: [Kantonspolizei Kanton Zürich, Datensatz 718](https://www.zh.ch/de/politik-staat/statistik-daten/datenkatalog.html#/datasets/718@kantonspolizei-kanton-zuerich).
+
+# Wie viele Unfälle passieren pro Jahr?
+
+Zum Einstieg der Verlauf über die Jahre. Das aktuellste Jahr kann unvollständig sein, weil noch nicht alle Unfälle erfasst wurden.
+
 ```{r}
-# transform, analyse and present your data
+#| label: fig-unfaelle-pro-jahr
+#| fig-cap: "Registrierte Verkehrsunfälle pro Jahr"
+plot_jahr <- verkehrsunfaelle |>
+  count(jahr) |>
+  ggplot(aes(x = jahr, y = n)) +
+  geom_col(fill = zhpal$zhblue[1], width = 0.7) +
+  scale_x_continuous(breaks = seq(2011, 2025, 2)) +
+  scale_y_continuous(labels = \(x) gt::vec_fmt_number(x, sep_mark = "'", decimals = 0)) +
+  labs(
+    title = "Registrierte Verkehrsunfälle pro Jahr",
+    subtitle = "Kanton Zürich, 2011 bis 2025",
+    x = NULL,
+    y = "Anzahl Unfälle",
+    caption = "Datenquelle: Kantonspolizei Kanton Zürich"
+  ) +
+  theme_stat()
+
+flush_left(plot_jahr)
+```
+
+Die Zahl der registrierten Unfälle bewegt sich über die Jahre auf einem ähnlichen Niveau. Interessanter als die schiere Menge ist die Frage, wie sich diese Unfälle auf die Verkehrsteilnehmenden verteilen.
+
+# Wer ist beteiligt?
+
+Wir teilen jeden Unfall danach ein, ob eine zu Fuss gehende Person, ein Velo oder ein Motorrad beteiligt war. Alle übrigen Unfälle (überwiegend Kollisionen zwischen Autos, Parkier- und Auffahrunfälle) fassen wir in einer Restkategorie zusammen.
+
+```{r}
+#| label: fig-beteiligung
+#| fig-cap: "Anteil der Unfälle nach beteiligter Verkehrsart"
+beteiligung_sum <- verkehrsunfaelle |>
+  count(beteiligung) |>
+  mutate(anteil = n / sum(n))
+
+plot_beteiligung <- beteiligung_sum |>
+  ggplot(aes(x = n, y = fct_rev(beteiligung))) +
+  geom_col(fill = zhpal$zhblue[1], width = 0.75) +
+  geom_text(
+    aes(label = scales::percent(anteil, accuracy = 0.1, decimal.mark = ",")),
+    hjust = -0.15, size = 3.2
+  ) +
+  scale_x_continuous(
+    labels = \(x) gt::vec_fmt_number(x, sep_mark = "'", suffixing = TRUE, decimals = 0),
+    expand = expansion(mult = c(0, 0.15))
+  ) +
+  labs(
+    title = "Die meisten Unfälle betreffen den motorisierten Verkehr",
+    subtitle = "Anteil aller Unfälle nach beteiligter Verkehrsart, 2011 bis 2025",
+    x = "Anzahl Unfälle",
+    y = NULL,
+    caption = "Datenquelle: Kantonspolizei Kanton Zürich"
+  ) +
+  theme_stat()
+
+flush_left(plot_beteiligung)
+```
+
+```{r}
+#| label: werte-beteiligung
+anteil_zu_fuss <- beteiligung_sum |>
+  filter(beteiligung == "Zu Fuss") |>
+  pull(anteil)
+anteil_velo <- beteiligung_sum |>
+  filter(beteiligung == "Velo") |>
+  pull(anteil)
+```
+
+Zu Fuss Gehende sind nur an rund `r scales::percent(anteil_zu_fuss, accuracy = 0.1, decimal.mark = ",")` aller Unfälle beteiligt, Velofahrende an etwa `r scales::percent(anteil_velo, accuracy = 0.1, decimal.mark = ",")`. Gemessen an der Zahl der Unfälle sind das kleine Gruppen. Das eigentliche Bild zeigt sich erst, wenn wir die Schwere der Unfälle dazunehmen.
+
+# Wie schwer sind die Unfälle je nach Beteiligung?
+
+Jetzt kombinieren wir zwei Variablen: die beteiligte Verkehrsart und den Schweregrad. Wir betrachten den Anteil der Unfälle, die mit Schwerverletzten oder Getöteten enden.
+
+```{r}
+#| label: fig-schwere-nach-beteiligung
+#| fig-cap: "Anteil schwerer und tödlicher Unfälle nach beteiligter Verkehrsart"
+schwere_sum <- verkehrsunfaelle |>
+  summarise(
+    anteil_schwer = mean(schwer_verletzt_getoetet),
+    .by = beteiligung
+  )
+
+plot_schwere <- schwere_sum |>
+  ggplot(aes(x = anteil_schwer, y = fct_reorder(beteiligung, anteil_schwer))) +
+  geom_col(fill = zhpal$zhblue[1], width = 0.75) +
+  geom_text(
+    aes(label = scales::percent(anteil_schwer, accuracy = 0.1, decimal.mark = ",")),
+    hjust = -0.15, size = 3.2
+  ) +
+  scale_x_continuous(
+    labels = scales::label_percent(decimal.mark = ","),
+    expand = expansion(mult = c(0, 0.15))
+  ) +
+  labs(
+    title = "Fuss- und Velounfälle enden viel häufiger schwer",
+    subtitle = "Anteil der Unfälle mit Schwerverletzten oder Getöteten, 2011 bis 2025",
+    x = "Anteil schwer/tödlich",
+    y = NULL,
+    caption = "Datenquelle: Kantonspolizei Kanton Zürich"
+  ) +
+  theme_stat()
+
+flush_left(plot_schwere)
+```
+
+```{r}
+#| label: werte-schwere
+schwere_zu_fuss <- schwere_sum |>
+  filter(beteiligung == "Zu Fuss") |>
+  pull(anteil_schwer)
+schwere_uebrige <- schwere_sum |>
+  filter(beteiligung == "Übrige (v.a. Auto)") |>
+  pull(anteil_schwer)
+faktor <- round(schwere_zu_fuss / schwere_uebrige)
+```
+
+Das ist der Kern des Berichts. Bei Unfällen mit zu Fuss Gehenden endet rund `r scales::percent(schwere_zu_fuss, accuracy = 0.1, decimal.mark = ",")` schwer oder tödlich, bei den übrigen Unfällen nur `r scales::percent(schwere_uebrige, accuracy = 0.1, decimal.mark = ",")`. Fussgängerunfälle sind damit etwa `r faktor`-mal so häufig schwer wie Unfälle im übrigen Verkehr. Auch Velofahrende tragen ein deutlich erhöhtes Risiko.
+
+Anders gesagt: Zu Fuss Gehende und Velofahrende machen zwar wenige Unfälle aus, aber einen grossen Teil des schweren Leids.
+
+```{r}
+#| label: fig-getoetete
+#| fig-cap: "Beteiligung bei tödlichen Unfällen im Vergleich zu allen Unfällen"
+# Zwei Gruppen: einmal alle Unfälle, einmal nur die tödlichen.
+# Jeder tödliche Unfall taucht also in beiden Gruppen auf.
+alle <- verkehrsunfaelle |>
+  count(beteiligung) |>
+  mutate(gruppe = "Alle Unfälle")
+
+toedlich <- verkehrsunfaelle |>
+  filter(schweregrad == "Unfall mit Getöteten") |>
+  count(beteiligung) |>
+  mutate(gruppe = "Tödliche Unfälle")
+
+vergleich <- bind_rows(alle, toedlich) |>
+  mutate(anteil = n / sum(n), .by = gruppe)
+
+plot_getoetete <- vergleich |>
+  ggplot(aes(x = anteil, y = fct_rev(gruppe), fill = beteiligung)) +
+  geom_col(width = 0.6) +
+  scale_x_continuous(labels = scales::label_percent()) +
+  scale_fill_manual(values = zhpal$zhwebaccent) +
+  labs(
+    title = "Bei tödlichen Unfällen sind Fussgänger stark übervertreten",
+    subtitle = "Verteilung der Beteiligung, alle vs. tödliche Unfälle",
+    x = NULL,
+    y = NULL,
+    fill = NULL,
+    caption = "Datenquelle: Kantonspolizei Kanton Zürich"
+  ) +
+  theme_stat()
+
+flush_left(plot_getoetete)
+```
+
+# Wo und wann sind die gefährdeten Gruppen betroffen?
+
+Zum Schluss schauen wir, unter welchen Bedingungen Fuss- und Velounfälle passieren. Das hilft bei der Frage, wo Massnahmen ansetzen könnten.
+
+## Strassentyp
+
+```{r}
+#| label: fig-strassentyp
+#| fig-cap: "Fuss- und Velounfälle nach Strassentyp"
+plot_strasse <- verkehrsunfaelle |>
+  filter(beteiligung %in% c("Zu Fuss", "Velo")) |>
+  count(strassentyp, beteiligung) |>
+  ggplot(aes(x = n, y = fct_reorder(strassentyp, n, sum), fill = beteiligung)) +
+  geom_col(width = 0.7) +
+  scale_x_continuous(
+    labels = \(x) gt::vec_fmt_number(x, sep_mark = "'", suffixing = TRUE, decimals = 0)
+  ) +
+  scale_fill_manual(values = zhpal$zhwebaccent[1:2]) +
+  labs(
+    title = "Fuss- und Velounfälle passieren vor allem im Ortsnetz",
+    subtitle = "Anzahl Unfälle nach Strassentyp, 2011 bis 2025",
+    x = "Anzahl Unfälle",
+    y = NULL,
+    fill = NULL,
+    caption = "Datenquelle: Kantonspolizei Kanton Zürich"
+  ) +
+  theme_stat()
+
+flush_left(plot_strasse)
+```
+
+## Tageszeit
+
+```{r}
+#| label: fig-tageszeit
+#| fig-cap: "Fuss- und Velounfälle nach Tageszeit"
+plot_stunde <- verkehrsunfaelle |>
+  filter(beteiligung %in% c("Zu Fuss", "Velo"), !is.na(stunde)) |>
+  count(stunde, beteiligung) |>
+  ggplot(aes(x = stunde, y = n, colour = beteiligung)) +
+  geom_line(linewidth = 1.1) +
+  scale_x_continuous(breaks = seq(0, 24, 4)) +
+  scale_colour_manual(values = zhpal$zhwebaccent[1:2]) +
+  labs(
+    title = "Zwei Spitzen: Schulweg am Mittag und Feierabendverkehr",
+    subtitle = "Anzahl Fuss- und Velounfälle nach Stunde des Tages, 2011 bis 2025",
+    x = "Stunde des Tages",
+    y = "Anzahl Unfälle",
+    colour = NULL,
+    caption = "Datenquelle: Kantonspolizei Kanton Zürich"
+  ) +
+  theme_stat()
+
+flush_left(plot_stunde)
 ```
 
 # Fazit
 
+- Über die Jahre bleibt die Zahl der registrierten Unfälle im Kanton Zürich auf einem ähnlichen Niveau.
+- Zu Fuss Gehende und Velofahrende sind nur an einem kleinen Teil aller Unfälle beteiligt, tragen aber ein stark erhöhtes Risiko für schwere und tödliche Verletzungen. Fussgängerunfälle enden rund `r faktor`-mal so häufig schwer wie Unfälle im übrigen Verkehr.
+- Bei den tödlichen Unfällen sind zu Fuss Gehende deutlich übervertreten.
+- Diese Unfälle passieren vor allem auf Haupt- und Nebenstrassen im Ortsnetz und häufen sich zur Mittagszeit und im Feierabendverkehr.
+
+Für die Verkehrssicherheit heisst das: Die Zahl der Unfälle allein ist ein schwacher Massstab. Wer den Schutz der schwächsten Verkehrsteilnehmenden ernst nimmt, muss auf die Schwere der Unfälle und auf die betroffenen Gruppen schauen.
+
 # Anhang
+
+## Verwendete Variablen
+
+Der Analyse-Ausschnitt enthält zehn Variablen: Unfalltyp, Schweregrad, Beteiligung von zu Fuss Gehenden / Velo / Motorrad, Strassentyp sowie Jahr, Monat, Wochentag und Stunde.
+
+## Reproduzierbarkeit
+
+```{r}
+#| label: session-info
+#| echo: true
+sessionInfo()
+```
