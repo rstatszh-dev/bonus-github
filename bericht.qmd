@@ -94,9 +94,15 @@ Jede Person hat einen eigenen Abschnitt (1 bis 4) mit einer fertigen Grafik.
 Deine Aufgabe:
 
 1. Rendere den Bericht einmal und schau dir alle Grafiken an.
-2. Geh zu deinem Abschnitt (dein Issue sagt dir, welcher).
-3. Schreib zwei bis vier Sätze, die deine Grafik beschreiben.
+2. Erstelle eine Branch mit dem Namen "issue-N-<slug>" (z. B. "issue-3-methoden").
+3. Geh zu deinem Abschnitt (dein Issue sagt dir, welcher).
+4. Schreib zwei bis vier Sätze, die deine Grafik beschreiben.
    Ersetze dazu die Zeile "TODO: ..." mit deinem Text.
+5. Committe deine Änderungen auf deine Branch.
+6. Auf GitHub, öffne einen Pull Request gegen "main" und markiere eine andere Person
+   als Reviewer. Verlinke dein Issue (z. B. "Closes #N").
+7. Reviewe den Pull Request, der dir zugewiesen ist, und hinterlasse
+   mindestens einen Kommentar.
 
 Der Code bleibt unverändert. Im gerenderten Bericht wird kein Code angezeigt.
 -->
